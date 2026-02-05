@@ -1,0 +1,12 @@
+{
+  "download_directory": "downloads",
+  "json_only_mode": false,
+  "url_tracking": {
+    "imported_urls": [],
+    "downloaded_urls": [],
+    "url_to_filename": {},
+    "archive_groups": {}
+  },
+  "archive_groups": {},
+  "unzip_directory": "downloads"
+}
