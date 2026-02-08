@@ -29,23 +29,30 @@ if not exist "fitgirl.py" (
     exit /b 1
 )
 
-REM Check if requirements.txt exists
-if exist "requirements.txt" (
-    echo Checking dependencies...
-    python -c "import requests, bs4, psutil, PIL" >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo Installing required dependencies...
-        pip install -r requirements.txt
-        if %errorlevel% neq 0 (
-            echo Error: Failed to install dependencies!
-            echo Please run: pip install -r requirements.txt
-            echo.
-            pause
-            exit /b 1
-        )
-    )
-) else (
-    echo Warning: requirements.txt not found. Assuming dependencies are already installed.
+REM Check and install required libraries
+echo Checking dependencies...
+python -c "import requests" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing requests library...
+    pip install requests
+)
+
+python -c "import bs4" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing beautifulsoup4 library...
+    pip install beautifulsoup4
+)
+
+python -c "import psutil" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing psutil library...
+    pip install psutil
+)
+
+python -c "import PIL" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing Pillow library...
+    pip install Pillow
 )
 
 REM Run the application
