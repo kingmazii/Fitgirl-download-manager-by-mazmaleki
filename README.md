@@ -1,6 +1,6 @@
-# Fitgirl Downloader by MazMaleki
+# Smart Download Manager by MazMaleki (fitgirl repack batch downloader) 
 
-A comprehensive download manager for Fitgirl repacks with smart extraction, auto-resume, and notification features.
+A comprehensive download manager for every internet download links and Fitgirl repacks with smart extraction, auto-resume, and notification features.
 
 ## Features
 
