@@ -508,3 +508,95 @@ def clean_folder_name(name):
         name = re.sub(pattern, '', name, flags=re.IGNORECASE)
         
     return name.strip()
+
+# ===== SMART SCAN ENHANCEMENT FUNCTIONS =====
+
+def update_existing_files_count(group_name: str, existing_count: int):
+    """Update existing files count for a group"""
+    tracking = get_url_tracking()
+    groups = tracking.get('archive_groups', {})
+    
+    # Find the group key (try with and without _group suffix)
+    group_key = None
+    for key in groups.keys():
+        if key.replace('_group', '') == group_name.replace('_group', ''):
+            group_key = key
+            break
+    
+    if group_key and group_key in groups:
+        groups[group_key]['existing_files'] = existing_count
+        # Update total_available and completion percentage
+        downloaded_count = groups[group_key].get('downloaded_count', 0)
+        total_parts = groups[group_key].get('total_parts', 0)
+        
+        # Smart total: use existing + downloaded, but cap at total_parts
+        total_available = min(existing_count + downloaded_count, total_parts)
+        groups[group_key]['total_available'] = total_available
+        
+        # Update completion percentage
+        if total_parts > 0:
+            groups[group_key]['completion_percentage'] = (total_available / total_parts) * 100
+        
+        save_url_tracking(tracking)
+        return True
+    
+    return False
+
+def get_existing_files_count(group_name: str) -> int:
+    """Get existing files count for a group"""
+    tracking = get_url_tracking()
+    groups = tracking.get('archive_groups', {})
+    
+    # Find the group key (try with and without _group suffix)
+    for key in groups.keys():
+        if key.replace('_group', '') == group_name.replace('_group', ''):
+            return groups[key].get('existing_files', 0)
+    
+    return 0
+
+def calculate_smart_completion(group_name: str) -> float:
+    """Calculate smart completion percentage including existing files"""
+    tracking = get_url_tracking()
+    groups = tracking.get('archive_groups', {})
+    
+    # Find the group key (try with and without _group suffix)
+    for key in groups.keys():
+        if key.replace('_group', '') == group_name.replace('_group', ''):
+            group_data = groups[key]
+            existing_files = group_data.get('existing_files', 0)
+            downloaded_count = group_data.get('downloaded_count', 0)
+            total_parts = group_data.get('total_parts', 0)
+            
+            # Smart total: use existing + downloaded, but cap at total_parts
+            total_available = min(existing_files + downloaded_count, total_parts)
+            
+            if total_parts > 0:
+                return (total_available / total_parts) * 100
+    
+    return 0.0
+
+def mark_file_as_existing(filename: str, group_name: str):
+    """Mark a file as existing on disk to prevent re-download"""
+    tracking = get_url_tracking()
+    
+    # Add to existing files list if not present
+    if 'existing_files_list' not in tracking:
+        tracking['existing_files_list'] = {}
+    
+    if group_name not in tracking['existing_files_list']:
+        tracking['existing_files_list'][group_name] = []
+    
+    if filename not in tracking['existing_files_list'][group_name]:
+        tracking['existing_files_list'][group_name].append(filename)
+    
+    save_url_tracking(tracking)
+
+def is_file_marked_as_existing(filename: str, group_name: str) -> bool:
+    """Check if a file is already marked as existing"""
+    tracking = get_url_tracking()
+    existing_files = tracking.get('existing_files_list', {})
+    
+    if group_name in existing_files:
+        return filename in existing_files[group_name]
+    
+    return False

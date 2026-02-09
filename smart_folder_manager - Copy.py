@@ -28,7 +28,7 @@ class SmartFolderManager:
         
         # Auto-scan variables
         self.auto_scan_enabled = tk.BooleanVar(value=True)  # Changed to True by default
-        self.auto_scan_interval = 10
+        self.auto_scan_interval = 30
         self.auto_scan_job = None
         
         # Failed extraction tracking
@@ -77,7 +77,7 @@ class SmartFolderManager:
         auto_frame = ttk.Frame(main_frame)
         auto_frame.pack(fill="x", pady=(0, 10))
         
-        self.auto_scan_check = ttk.Checkbutton(auto_frame, text="🔄 Auto-scan every 10 seconds", 
+        self.auto_scan_check = ttk.Checkbutton(auto_frame, text="🔄 Auto-scan every 30 seconds", 
                                                variable=self.auto_scan_enabled, command=self.toggle_auto_scan)
         self.auto_scan_check.pack(side="left")
         
@@ -321,15 +321,6 @@ class SmartFolderManager:
                 total_parts = group_data.get('total_parts', 0)
                 completion_pct = group_data.get('completion_percentage', 0)
                 
-                # ===== SMART COMPLETION ENHANCEMENT =====
-                # Use smart completion (existing + downloaded) instead of regular completion
-                from config_manager import calculate_smart_completion
-                smart_completion = calculate_smart_completion(group_file_name)
-                
-                # Use smart completion for extraction decisions
-                if smart_completion > completion_pct:
-                    completion_pct = smart_completion
-                
                 # === MULTI-SOURCE CHECKING ===
                 from config_manager import get_group_fetch_total, get_url_tracking
                 from pathlib import Path
@@ -477,38 +468,16 @@ class SmartFolderManager:
                 self.log(f"📦 No JSON groups ready, extracting non-JSON group: {non_json_groups[0]}", "blue")
                 self._auto_extract_group(non_json_groups[0])
         else:
-            # ===== ENHANCEMENT: Smart completion check for JSON-only mode =====
-            # Even in JSON-only mode, extract if group is complete (existing + downloaded = total)
-            ready_json_groups = []
-            skipped_json_groups = []
-            
+            # JSON-only mode - log that non-JSON groups are being skipped
+            skipped_non_json = []
             for group_name in self.file_groups:
                 if group_name not in json_group_names:
                     if (group_name not in self.failed_groups and 
                         group_name not in self.extracted_groups):
-                        # Use smart completion (existing + downloaded)
-                        from config_manager import calculate_smart_completion
-                        smart_completion = calculate_smart_completion(group_name)
-                        
-                        if smart_completion >= 100.0:
-                            # Group is complete - extract even in JSON-only mode
-                            self.log(f"🚀 JSON-only mode: Smart completion {smart_completion:.1f}% - auto-extracting {group_name}", "green")
-                            ready_json_groups.append(group_name)
-                        else:
-                            # Group not complete - skip
-                            self.log(f"🎯 JSON-only mode: Group {group_name} incomplete ({smart_completion:.1f}%) - skipping", "orange")
-                            skipped_json_groups.append(group_name)
-                        
-            # Extract ready JSON groups first
-            if ready_json_groups:
-                for group_name in ready_json_groups:
-                    self.log(f"✅ JSON group '{group_name}' is 100% complete - starting auto-extraction", "green")
-                    # Add a 5-second delay before extraction to ensure files are fully written
-                    self.parent.after(5000, lambda: self._auto_extract_group(group_name))
+                        skipped_non_json.append(group_name)
             
-            # Log skipped groups if any
-            if skipped_json_groups:
-                self.log(f"🎯 JSON-only mode: Skipped {len(skipped_json_groups)} incomplete groups", "orange")
+            if skipped_non_json:
+                self.log(f"🎯 JSON-only mode: Skipping {len(skipped_non_json)} non-JSON groups", "blue")
                         
     def _update_json_tracking(self, group_name, new_downloaded_count, downloaded_files):
         """Update JSON tracking when new files are detected"""
@@ -1314,193 +1283,6 @@ class SmartFolderManager:
             self._delete_archive_group(first_group, 0)
         else:
             self.log("🗑️ Delete archives: No groups found to delete", "orange")
-
-# ===== SMART SCAN ENHANCEMENT FUNCTIONS =====
-
-def auto_smart_scan_after_fetch(download_folder: str, game_groups: dict, main_app_callback=None):
-    """Auto-scan folder for existing archives after fetch and update JSON"""
-    from config_manager import update_existing_files_count, mark_file_as_existing, add_downloaded_url
-    from pathlib import Path
-    import re
-    
-    download_path = Path(download_folder)
-    if not download_path.exists():
-        return False
-    
-    scanned_groups = {}
-    
-    # Scan for existing archives
-    extensions = ['*.rar', '*.zip', '*.7z', '*.r01', '*.r02', '*.r03', '*.r04', '*.r05']
-    archive_files = []
-    
-    for ext in extensions:
-        try:
-            files = list(download_path.glob(ext))
-            archive_files.extend(files)
-        except Exception as e:
-            print(f"Error searching {ext}: {e}")
-    
-    # Also search for part files
-    try:
-        all_files = list(download_path.glob('*'))
-        part_files = [f for f in all_files if 'part' in f.name.lower() and f.is_file()]
-        archive_files.extend(part_files)
-    except Exception as e:
-        print(f"Error searching part files: {e}")
-    
-    archive_files = list(set(archive_files))  # Remove duplicates
-    
-    # Group files by base name
-    for file_path in archive_files:
-        base_name = _extract_base_name_from_filename(file_path.name)
-        if base_name not in scanned_groups:
-            scanned_groups[base_name] = []
-        scanned_groups[base_name].append(file_path.name)
-    
-    # Update JSON with existing files count and mark as downloaded
-    from config_manager import get_url_tracking, save_url_tracking
-    tracking = get_url_tracking()
-    
-    for game_name, game_data in game_groups.items():
-        # Normalize game name for matching
-        normalized_game_name = game_name.replace('–', '--').replace('_', ' ').strip()
-        
-        # Find matching scanned group
-        matching_count = 0
-        matching_files = []
-        for scanned_name, files in scanned_groups.items():
-            normalized_scanned = scanned_name.replace('–', '--').replace('_', ' ').strip()
-            
-            # Check if names match (case-insensitive, partial match)
-            if (normalized_game_name.lower() in normalized_scanned.lower() or 
-                normalized_scanned.lower() in normalized_game_name.lower()):
-                matching_count = len(files)
-                matching_files = files
-                break
-        
-        if matching_count > 0:
-            # Update JSON with existing files count
-            update_existing_files_count(game_name, matching_count)
-            
-            # Mark files as existing to prevent re-download
-            for scanned_name, files in scanned_groups.items():
-                normalized_scanned = scanned_name.replace('–', '--').replace('_', ' ').strip()
-                if (normalized_game_name.lower() in normalized_scanned.lower() or 
-                    normalized_scanned.lower() in normalized_game_name.lower()):
-                    for filename in files:
-                        mark_file_as_existing(filename, game_name)
-                    break
-            
-            # ===== NEW: Mark existing files as downloaded =====
-            # Find URLs for these files and mark as downloaded
-            url_tracking_data = tracking.get('url_to_filename', {})
-            
-            for filename in matching_files:
-                # Find URL that matches this filename (handle Unicode issues)
-                for url, stored_filename in url_tracking_data.items():
-                    # Try exact match first
-                    if stored_filename == filename:
-                        # Mark as downloaded in main tracking
-                        if url not in tracking.get('downloaded_urls', []):
-                            tracking['downloaded_urls'].append(url)
-                            print(f"Marked existing file as downloaded: {filename}")
-                            
-                            # ===== UI UPDATE CALLBACK =====
-                            # Update main app UI if callback provided
-                            if main_app_callback:
-                                main_app_callback(url, "completed")
-                    # Try normalized match (handle Unicode vs -- issues)
-                    elif (stored_filename.replace('�', '--') == filename or 
-                          stored_filename == filename.replace('�', '--')):
-                        # Mark as downloaded in main tracking
-                        if url not in tracking.get('downloaded_urls', []):
-                            tracking['downloaded_urls'].append(url)
-                            print(f"Marked existing file as downloaded (normalized): {filename}")
-                            
-                            # ===== UI UPDATE CALLBACK =====
-                            # Update main app UI if callback provided
-                            if main_app_callback:
-                                main_app_callback(url, "completed")
-            
-            # Save updated tracking
-            save_url_tracking(tracking)
-    
-    return scanned_groups
-
-def _extract_base_name_from_filename(filename: str) -> str:
-    """Extract base name from filename for grouping"""
-    name = Path(filename).stem
-    
-    patterns = [
-        r'[._]part\d+$',
-        r'\.part\d+$',
-        r'\.r\d+$',
-        r'\.rar$',
-    ]
-    
-    for pattern in patterns:
-        name = re.sub(pattern, '', name, flags=re.IGNORECASE)
-    
-    return name.strip()
-
-def trigger_smart_scan_after_fetch(download_folder: str, game_groups: dict, main_app_callback=None):
-    """Trigger smart scan after fetch - visible to user, then auto-close"""
-    import threading
-    import tkinter as tk
-    from tkinter import messagebox
-    
-    # Create temporary window for scanning
-    scan_window = tk.Toplevel()
-    scan_window.title("Smart Scan - Existing Files")
-    scan_window.geometry("400x150")
-    scan_window.resizable(False, False)
-    
-    # Center the window
-    scan_window.update_idletasks()
-    x = (scan_window.winfo_screenwidth() // 2) - (400 // 2)
-    y = (scan_window.winfo_screenheight() // 2) - (150 // 2)
-    scan_window.geometry(f"400x150+{x}+{y}")
-    
-    # Add scanning message
-    tk.Label(scan_window, text="🔍 Scanning for existing archives...", 
-             font=("Segoe UI", 12)).pack(pady=20)
-    tk.Label(scan_window, text="This will update download progress and skip existing files", 
-             font=("Segoe UI", 10), wraplength=350).pack(pady=10)
-    
-    # Start scanning in background thread
-    def scan_worker():
-        try:
-            result = auto_smart_scan_after_fetch(download_folder, game_groups, main_app_callback)
-            
-            # Close window after scan
-            scan_window.after(100, scan_window.destroy)
-            
-            # Show result
-            if result:
-                total_files = sum(len(files) for files in result.values())
-                scan_window.after(200, lambda: messagebox.showinfo(
-                    "Smart Scan Complete", 
-                    f"Found {total_files} existing archive files\nDownload progress updated automatically"
-                ))
-            else:
-                scan_window.after(200, lambda: messagebox.showinfo(
-                    "Smart Scan Complete", 
-                    "No existing archive files found"
-                ))
-                
-        except Exception as e:
-            scan_window.after(100, scan_window.destroy)
-            scan_window.after(200, lambda: messagebox.showerror(
-                "Scan Error", 
-                f"Error during scan: {str(e)}"
-            ))
-    
-    # Start scan thread
-    thread = threading.Thread(target=scan_worker, daemon=True)
-    thread.start()
-    
-    # Auto-close after 10 seconds max
-    scan_window.after(10000, scan_window.destroy)
 
 # Test function
 def test_smart_manager():

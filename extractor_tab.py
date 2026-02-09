@@ -347,12 +347,8 @@ class ExtractorTab:
             set_setting("unzip_directory", folder)
 
     def start_extract(self):
-        """Start extraction using Smart Folder Manager"""
-        if not self.first_extraction_done:
-            self.first_extraction_done = True
-            self.open_smart_manager(auto_start=True)
-        else:
-            self.open_smart_manager()
+        """Start direct extraction without smart folder manager"""
+        self.run_extraction()
     
     def open_smart_manager(self, auto_start=False):
         """Open Smart Folder Manager in a separate window"""
@@ -997,54 +993,95 @@ class ExtractorTab:
             return False
     
     def run_extraction(self, wait_for_completion=True):
+        """Manual extraction - direct extraction without smart folder manager"""
         archive = self.archive_path.get()
         dest = self.dest_path.get()
         pwd = self.password.get()
         
-        exe = self.available_tools["winrar"]  # Only WinRAR now
+        if not archive or not dest:
+            if wait_for_completion:
+                self.parent.after(0, lambda: messagebox.showerror("Error", "Archive and destination required"))
+                self.parent.after(0, self.extraction_finished, False)
+            return None
         
-        # Create folder based on archive name without numbering
-        archive_name = Path(archive).stem  # Get filename without extension
-        folder_name = self.clean_archive_name(archive_name)
-        extract_dest = Path(dest) / folder_name
+        # Create destination folder if it doesn't exist
+        extract_dest = Path(dest)
         extract_dest.mkdir(exist_ok=True)
         
-        # Build WinRAR command
-        cmd = [exe, "x", archive, str(extract_dest), "-y"]  # -y for yes to all prompts
-        if pwd:
-            cmd.insert(2, f"-p{pwd}")
-        # Add -ibck+ to prevent background button and keep window on top
-        cmd.append("-ibck+")
-
+        # Create subfolder with archive name (like smart manager does)
+        archive_name = Path(archive).stem  # Get filename without extension
+        folder_name = self.clean_archive_name(archive_name)
+        final_dest = extract_dest / folder_name
+        final_dest.mkdir(exist_ok=True)
+        
+        # Use WinRAR only
+        return self._run_winrar_extraction(archive, str(final_dest), pwd, wait_for_completion)
+    
+    def _run_winrar_extraction(self, archive, extract_dest, pwd, wait_for_completion=True):
+        """Extract using WinRAR with 2-hour timeout"""
         try:
-            # Show WinRAR progress window
+            # Use the already detected WinRAR path
+            if "winrar" not in self.available_tools:
+                if wait_for_completion:
+                    self.parent.after(0, lambda: messagebox.showerror("Error", "WinRAR not found!"))
+                    self.parent.after(0, self.extraction_finished, False)
+                return None
+            
+            winrar_path = self.available_tools["winrar"]
+            
+            # Build WinRAR command
+            cmd = [winrar_path, "x", archive, str(extract_dest), "-y"]  # -y for yes to all prompts
+            if pwd:
+                cmd.insert(2, f"-p{pwd}")
+            # Add -ibck+ to prevent background button and keep window on top
+            cmd.append("-ibck+")
+            
+            # Show indeterminate progress while extracting
+            self.progress.start(10)
+            self.progress_label.config(text="Working...")
+            self.status_label.config(text="Extracting...", foreground="blue")
+            
+            # Start extraction with 2-hour timeout
             self.extraction_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True
             )
+            
+            # Wait for extraction to complete
+            if self.extraction_process and wait_for_completion:
+                try:
+                    self.extraction_process.wait(timeout=7200)  # 2 hours timeout
+                    success = self.extraction_process.returncode == 0
+                    self.extraction_process = None
+                    
+                    if wait_for_completion:
+                        self.parent.after(0, self.extraction_finished, success, extract_dest)
+                    return success
+                except Exception as e:
+                    if "TimeoutExpired" in str(type(e)) or "timeout" in str(e).lower():
+                        self.extraction_process.kill()
+                        self.extraction_process = None
+                        if wait_for_completion:
+                            self.parent.after(0, lambda: messagebox.showerror("Error", "Extraction timed out after 2 hours"))
+                            self.parent.after(0, self.extraction_finished, False)
+                        return False
+                    else:
+                        raise
+            elif self.extraction_process:
+                # For async mode, return process
+                return self.extraction_process
+            else:
+                # Process creation failed
+                if wait_for_completion:
+                    self.parent.after(0, self.extraction_finished, False, extract_dest)
+                return None
+                
         except Exception as e:
             if wait_for_completion:
-                self.parent.after(0, lambda: messagebox.showerror("Error", f"Cannot run {exe}: {e}"))
+                self.parent.after(0, lambda: messagebox.showerror("Error", f"Cannot run WinRAR: {e}"))
                 self.parent.after(0, self.extraction_finished, False)
-            return None
-
-        # Wait for extraction to complete (no progress parsing for WinRAR)
-        if self.extraction_process and wait_for_completion:
-            self.extraction_process.wait()
-
-            # Extraction finished
-            success = self.extraction_process.returncode == 0
-            self.extraction_process = None
-            self.parent.after(0, self.extraction_finished, success, extract_dest)
-        elif self.extraction_process:
-            # For sequential mode, don't wait - return process for async handling
-            return self.extraction_process
-        else:
-            # Process was not created successfully
-            if wait_for_completion:
-                self.parent.after(0, self.extraction_finished, False, extract_dest)
             return None
     
     def clean_archive_name(self, archive_name):

@@ -1,4 +1,4 @@
-# Fitgirl Downloader by MazMaleki
+# 🎮 Fitgirl Downloader by MazMaleki
 
 A comprehensive download manager for Fitgirl repacks with smart extraction, auto-resume, and notification features.
 
@@ -21,14 +21,14 @@ A comprehensive download manager for Fitgirl repacks with smart extraction, auto
 
 ## ✨ Features
 
-- **Smart Download Manager**: Organizes downloads by game groups with auto-extraction
-- **Multi-threaded Downloads**: Fast parallel downloading with pause/resume capability
-- **Auto-Resume**: Automatically resumes interrupted downloads
-- **Smart Folder Management**: Groups archives by game and tracks extraction status
-- **Built-in Extractor**: Integrated RAR/ZIP extraction with password support
-- **GitHub Notifications**: Real-time update notifications from GitHub repository
-- **Multi-tab Help System**: Comprehensive help documentation
-- **Compact Donation UI**: Clean interface with Patreon integration and QR codes
+- **🧠 Smart Download Manager**: Organizes downloads by game groups with auto-extraction
+- **⚡ Multi-threaded Downloads**: Fast parallel downloading with pause/resume capability
+- **🔄 Auto-Resume**: Automatically resumes interrupted downloads
+- **📁 Smart Folder Management**: Groups archives by game and tracks extraction status
+- **🔧 Built-in Extractor**: Integrated RAR/ZIP extraction with password support
+- **📢 GitHub Notifications**: Real-time update notifications from GitHub repository
+- **📚 Multi-tab Help System**: Comprehensive help documentation
+- **💝 Compact Donation UI**: Clean interface with Patreon integration and QR codes
 
 ## 📁 Project Structure
 
@@ -54,10 +54,10 @@ The application creates `config.json` for storing:
 
 ## 🎮 Usage
 
-1. **Download Tab**: Browse and download Fitgirl repacks
-2. **Smart Manager Tab**: View and manage downloaded archives, extract games
-3. **Extractor Tab**: Manual extraction with password support
-4. **Help Tab**: Access comprehensive documentation
+1. **📥 Download Tab**: Browse and download Fitgirl repacks
+2. **🧠 Smart Manager Tab**: View and manage downloaded archives, extract games
+3. **🔧 Extractor Tab**: Manual extraction with password support
+4. **📚 Help Tab**: Access comprehensive documentation
 
 ## 💖 Support
 
@@ -125,17 +125,19 @@ Enjoy! If you find the tool helpful, please consider supporting the project — 
 
 ## 🔄 Changelog
 
-### Latest Version
-- **Compact donation window** with zero spacing
-- **Patreon integration** with clickable links
-- **Character encoding fixes** for archive names
-- **Enhanced delete confirmation** dialogs
-- **Multi-tab help system** with comprehensive documentation
-- **Password field** in extractor
-- **GitHub notification system**
-- **Auto-extraction fixes** for JSON-only mode
-- **Easy batch launcher** (`run.bat` for one-click execution)
-- **Library management** (`uninstall.bat` for clean removal)
+### Latest Version 🆕
+- **💝 Compact donation window** with zero spacing
+- **🎯 Patreon integration** with clickable links
+- **🔤 Character encoding fixes** for archive names
+- **⚠️ Enhanced delete confirmation** dialogs
+- **📚 Multi-tab help system** with comprehensive documentation
+- **🔐 Password field** in extractor
+- **📢 GitHub notification system**
+- **🎯 Auto-extraction fixes** for JSON-only mode
+- **🚀 Easy batch launcher** (`run.bat` for one-click execution)
+- **🧹 Library management** (`uninstall.bat` for clean removal)
+- **✅ Smart download completion detection** - Only triggers Smart Manager once when all downloads finish
+- **🔄 Improved URL status restoration** - Previously downloaded URLs maintain "completed" status when re-added
 
 ---
 

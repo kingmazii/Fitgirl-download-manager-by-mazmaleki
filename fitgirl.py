@@ -388,6 +388,9 @@ class DownloaderGUI:
 
         # Update UI in main thread
         self.root.after(0, lambda: self._add_resolved_links(resolved_links, total_available))
+        
+        # Reset status back to normal after resolution completes
+        self.root.after(100, lambda: self.set_status("Ready"))
 
     def confirm_and_clear_json(self):
         """Ask user confirmation before clearing JSON data for new session"""
@@ -477,25 +480,71 @@ class DownloaderGUI:
         url_to_filename = {}
         
         for text, real_dl in resolved_links:
+            print(f"DEBUG: Processing URL: {real_dl}")
+            print(f"DEBUG: Already in links list: {real_dl in self.links}")
+            
             if real_dl not in self.links:
+                # Check if this URL was previously downloaded
+                from config_manager import get_url_tracking
+                tracking = get_url_tracking()
+                downloaded_urls = tracking.get('downloaded_urls', [])
+                
+                print(f"DEBUG: Total downloaded URLs in tracking: {len(downloaded_urls)}")
+                print(f"DEBUG: URL in downloaded_urls: {real_dl in downloaded_urls}")
+                
+                # Set status based on whether it was previously downloaded
+                if real_dl in downloaded_urls:
+                    status = "completed"  # Restore completed status
+                    print(f"DEBUG: Restoring completed status for previously downloaded URL: {real_dl}")
+                else:
+                    status = "pending"  # New download
+                    print(f"DEBUG: Setting pending status for new URL: {real_dl}")
+                
                 self.links.append(real_dl)
-                self.url_status[real_dl] = "pending"
+                self.url_status[real_dl] = status
                 self.download_states[real_dl] = {"paused": False, "thread": None, "stop_event": threading.Event()}
                 self.add_url_item(real_dl)
                 new_urls.append(real_dl)
                 # Map download URL to original filename from FitGirl page
                 url_to_filename[real_dl] = text
                 added += 1
+            else:
+                print(f"DEBUG: URL already exists in download list, skipping: {real_dl}")
 
         if added:
-            print(f"About to call confirm_and_clear_json for {added} new URLs")
-            # Ask user about clearing previous session data
-            self.confirm_and_clear_json()
+            print(f"Added {added} new URLs")
+            
+            # Check if this is a fresh session (no existing URLs before adding new ones)
+            existing_urls_before_add = len(self.links) - added
+            if existing_urls_before_add == 0:  # This was a fresh session
+                print(f"About to call confirm_and_clear_json for fresh session")
+                self.confirm_and_clear_json()
             
             # Track imported URLs with proper filenames FIRST
             add_imported_urls(new_urls, url_to_filename, total_available)
             # THEN update filename labels in UI
             self.update_filename_labels(new_urls, url_to_filename)
+            
+            # ===== SMART SCAN ENHANCEMENT =====
+            # Trigger smart scan after fetch to detect existing archives
+            # Add small delay to prevent UI threading conflict
+            self.root.after(1000, lambda: self._trigger_smart_scan_delayed(all_links_groups))
+            
+    def _trigger_smart_scan_delayed(self, all_links_groups):
+        """Trigger smart scan with delay to prevent UI conflicts"""
+        from smart_folder_manager import trigger_smart_scan_after_fetch
+        from config_manager import get_setting
+            
+        # Get download folder
+        download_folder = get_setting("download_directory", "")
+        if download_folder and all_links_groups:
+            print(f"DEBUG: Triggering smart scan for {len(all_links_groups)} groups (delayed)")
+            # Trigger smart scan - visible to user, then auto-close
+            trigger_smart_scan_after_fetch(download_folder, all_links_groups, self.update_url_status)
+        else:
+            print("DEBUG: No fetch groups found for smart scan")
+            
+        if added > 0:
             messagebox.showinfo("Links Added", f"Added {added} resolved download links")
             self.set_status(f"Added {added} links to download list")
         else:
@@ -1250,9 +1299,50 @@ We remember and honor those who sacrificed their lives for freedom and justice. 
 
     def check_and_trigger_auto_extract(self):
         """Check if auto-extraction should be triggered based on multiple sources"""
-        # Trigger auto-extraction check in extractor tab
+        # Trigger existing Smart Manager from extraction tab
+        try:
+            # Check if extractor tab exists and has smart manager
+            if hasattr(self, 'extractor_tab') and hasattr(self.extractor_tab, 'open_smart_manager'):
+                print("DEBUG: Opening existing Smart Manager from extraction tab")
+                # Open existing Smart Manager
+                self.extractor_tab.open_smart_manager()
+                
+                # Start auto-scan after window opens
+                if hasattr(self.extractor_tab, 'smart_manager') and self.extractor_tab.smart_manager:
+                    self.extractor_tab.smart_manager_window.after(1000, self.extractor_tab.smart_manager.start_auto_scan)
+                else:
+                    print("DEBUG: Smart Manager not available for auto-scan")
+            else:
+                print("DEBUG: Extractor tab or smart manager not available")
+                
+        except Exception as e:
+            print(f"Error opening existing Smart Manager: {e}")
+        
+        # Also trigger extractor tab as fallback
         if hasattr(self, 'extractor_tab'):
             self.extractor_tab.check_downloads_and_extract()
+
+    def check_all_downloads_complete_and_trigger(self):
+        """Check if ALL downloads are complete and trigger auto-extraction only once"""
+        if not self.links:
+            return
+            
+        # Check if all URLs are completed
+        completed_count = 0
+        total_count = len(self.links)
+        
+        for url in self.links:
+            if self.url_status.get(url) == "completed":
+                completed_count += 1
+        
+        print(f"DEBUG: Download progress: {completed_count}/{total_count} completed")
+        
+        # Only trigger auto-extraction if ALL downloads are complete
+        if completed_count == total_count and total_count > 0:
+            print(f"DEBUG: All {total_count} downloads completed! Triggering auto-extraction once.")
+            self.check_and_trigger_auto_extract()
+        else:
+            print(f"DEBUG: Not all downloads complete yet ({completed_count}/{total_count})")
 
     def clean_archive_name(self, archive_name):
         """Remove numbering and clean up archive name for folder creation"""
@@ -1288,11 +1378,75 @@ We remember and honor those who sacrificed their lives for freedom and justice. 
             # Save to config
             set_setting("download_directory", str(p.resolve()))
             
+            # ===== SMART SCAN PATH CHANGE RESCAN =====
+            # Trigger smart rescan when download path changes
+            self.trigger_smart_rescan_after_path_change()
+            
             # Update extractor tab's default paths
             if hasattr(self, 'extractor_tab') and self.extractor_tab:
                 self.extractor_tab.update_paths_from_download_dir()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to set download folder: {e}")
+
+    def trigger_smart_rescan_after_path_change(self):
+        """Trigger smart rescan when download path changes"""
+        try:
+            from smart_folder_manager import trigger_smart_scan_after_fetch
+            from config_manager import get_archive_groups_status
+            
+            # Get current groups from JSON tracking
+            json_groups = get_archive_groups_status()
+            
+            # Convert to format expected by smart scan
+            game_groups = {}
+            for group_key, group_data in json_groups.items():
+                group_name = group_data.get('base_name', group_key)
+                game_groups[group_name] = group_data
+            
+            if game_groups:
+                print(f"DEBUG: Path changed - triggering smart rescan for {len(game_groups)} groups")
+                # Trigger smart scan with new path
+                trigger_smart_scan_after_fetch(str(self.download_dir.resolve()), game_groups, self.update_url_status)
+            else:
+                print("DEBUG: Path changed - no groups found for rescan")
+                
+        except Exception as e:
+            print(f"Error triggering smart rescan after path change: {e}")
+
+    def update_url_status(self, url: str, status: str):
+        """Update URL status in download list UI"""
+        try:
+            if url in self.url_status:
+                self.url_status[url] = status
+                print(f"DEBUG: Updated URL status: {url} -> {status}")
+                
+                # Update UI in main thread
+                self.root.after(0, lambda: self._update_url_item_status(url, status))
+        except Exception as e:
+            print(f"Error updating URL status: {e}")
+    
+    def _update_url_item_status(self, url: str, status: str):
+        """Update URL item status in UI"""
+        try:
+            # Find the listbox item for this URL
+            for i in range(self.url_listbox.size()):
+                item_text = self.url_listbox.get(i)
+                if url in item_text:
+                    # Update item text with new status
+                    if status == "completed":
+                        new_text = f"✅ {item_text.replace('⏳ ', '').replace('⬇️ ', '').replace('❌ ', '')}"
+                    elif status == "failed":
+                        new_text = f"❌ {item_text.replace('⏳ ', '').replace('⬇️ ', '').replace('✅ ', '')}"
+                    elif status == "downloading":
+                        new_text = f"⬇️ {item_text.replace('⏳ ', '').replace('✅ ', '').replace('❌ ', '')}"
+                    else:
+                        new_text = f"⏳ {item_text.replace('⬇️ ', '').replace('✅ ', '').replace('❌ ', '')}"
+                    
+                    self.url_listbox.delete(i)
+                    self.url_listbox.insert(i, new_text)
+                    break
+        except Exception as e:
+            print(f"Error updating URL item status: {e}")
 
     def set_status(self, text):
         # Make "resolving" text red
@@ -1731,6 +1885,12 @@ We remember and honor those who sacrificed their lives for freedom and justice. 
             return
         print(f"Download mode: {self.download_mode.get()}")
         
+        # Debug: Show status of all URLs before starting
+        print("DEBUG: URL statuses before starting downloads:")
+        for url in self.links:
+            status = self.url_status.get(url, "unknown")
+            print(f"  - {url[:50]}... : {status}")
+        
         self.stop_downloads()  # Stop any existing downloads
         
         # Initialize download threads tracking
@@ -1752,6 +1912,7 @@ We remember and honor those who sacrificed their lives for freedom and justice. 
         mode = self.download_mode.get()
         if mode == "one_by_one":
             print("Starting ONE BY ONE mode")
+            self.set_status("Downloading now...")
             threading.Thread(target=self.run_one_by_one, args=(run_id,), daemon=True).start()
         else:
             try:
@@ -1759,6 +1920,7 @@ We remember and honor those who sacrificed their lives for freedom and justice. 
                 print(f"Starting BATCH mode with size {batch_size}")
                 if batch_size <= 0:
                     raise ValueError
+                self.set_status("Downloading now...")
                 threading.Thread(target=self.run_batch, args=(run_id,), daemon=True).start()
             except ValueError:
                 messagebox.showerror("Error", "Invalid batch size")
@@ -1860,6 +2022,13 @@ We remember and honor those who sacrificed their lives for freedom and justice. 
                 break
             
             print(f"Processing URL {idx + 1}/{len(self.links)}: {page_url}")
+            
+            # Skip URLs that are already completed
+            current_status = self.url_status.get(page_url, "pending")
+            if current_status == "completed":
+                print(f"Skipping already completed URL: {page_url}")
+                continue
+            
             self.download_single_with_state(page_url, idx + 1, len(self.links), run_id)
             
             # Wait for current download to finish before starting next
@@ -1897,6 +2066,12 @@ We remember and honor those who sacrificed their lives for freedom and justice. 
             # Start all downloads in this batch
             threads = []
             for page_url in batch:
+                # Skip URLs that are already completed
+                current_status = self.url_status.get(page_url, "pending")
+                if current_status == "completed":
+                    print(f"Skipping already completed URL in batch: {page_url}")
+                    continue
+                
                 idx = self.links.index(page_url) + 1
                 thread = threading.Thread(
                     target=self.download_single_with_state,
@@ -1924,6 +2099,89 @@ We remember and honor those who sacrificed their lives for freedom and justice. 
         if run_id != self._run_id:
             print("Run id changed; aborting download")
             return
+        
+        # ===== CHECK IF ALREADY DOWNLOADED =====
+        # Skip if URL is already marked as downloaded OR if file exists on disk
+        from config_manager import get_url_tracking, get_setting, save_url_tracking
+        from pathlib import Path
+        
+        tracking = get_url_tracking()
+        downloaded_urls = tracking.get('downloaded_urls', [])
+        
+        # Check 1: URL already marked as downloaded
+        if page_url in downloaded_urls:
+            print(f"URL already downloaded, skipping: {page_url}")
+            # Update UI to show as completed
+            self.root.after(0, lambda: self.update_url_status(page_url, "completed"))
+            return
+        
+        # Check 2: File already exists on disk
+        url_to_filename = tracking.get('url_to_filename', {})
+        if page_url in url_to_filename:
+            filename = url_to_filename[page_url]
+            download_dir = get_setting("download_directory", "")
+            if download_dir:
+                file_path = Path(download_dir) / filename
+                
+                # Try exact match first
+                if file_path.exists():
+                    print(f"File already exists on disk, skipping: {filename}")
+                    # Mark as downloaded in tracking
+                    if page_url not in downloaded_urls:
+                        tracking['downloaded_urls'].append(page_url)
+                        save_url_tracking(tracking)
+                        print(f"Marked URL as downloaded: {page_url}")
+                    
+                    # Update UI to show as completed
+                    self.root.after(0, lambda: self.update_url_status(page_url, "completed"))
+                    return
+                
+                # Try Unicode normalization (replace various Unicode dashes with --)
+                normalized_filename = filename.replace('�', '--').replace('–', '--').replace('—', '--')
+                normalized_path = Path(download_dir) / normalized_filename
+                if normalized_path.exists():
+                    print(f"File already exists on disk (normalized), skipping: {normalized_filename}")
+                    # Mark as downloaded in tracking
+                    if page_url not in downloaded_urls:
+                        tracking['downloaded_urls'].append(page_url)
+                        save_url_tracking(tracking)
+                        print(f"Marked URL as downloaded: {page_url}")
+                    
+                    # Update UI to show as completed
+                    self.root.after(0, lambda: self.update_url_status(page_url, "completed"))
+                    return
+                
+                # Try finding by part number only (more specific - check game name too)
+                if '.part' in filename:
+                    import re
+                    part_match = re.search(r'\.part(\d+)\.', filename)
+                    if part_match:
+                        part_num = part_match.group(1)
+                        # Extract game name from filename (before first part number)
+                        game_name_match = re.match(r'(.+?)\.part\d+', filename)
+                        if game_name_match:
+                            game_name = game_name_match.group(1).lower()
+                            download_path = Path(download_dir)
+                            # Look for files with same part number AND similar game name
+                            for existing_file in download_path.glob(f"*part{part_num}.rar"):
+                                existing_game_name = re.match(r'(.+?)\.part\d+', existing_file.name)
+                                if existing_game_name:
+                                    existing_game = existing_game_name.group(1).lower()
+                                    # Check if game names match (handle Unicode differences)
+                                    if (game_name == existing_game or 
+                                        game_name.replace('�', '--') == existing_game or
+                                        existing_game.replace('�', '--') == game_name):
+                                        print(f"Found matching part file on disk, skipping: {existing_file.name}")
+                                        # Mark as downloaded in tracking
+                                        if page_url not in downloaded_urls:
+                                            tracking['downloaded_urls'].append(page_url)
+                                            save_url_tracking(tracking)
+                                            print(f"Marked URL as downloaded: {page_url}")
+                                        
+                                        # Update UI to show as completed
+                                        self.root.after(0, lambda: self.update_url_status(page_url, "completed"))
+                                        return
+        
         stop_event = self.download_states.get(page_url, {}).get("stop_event")
         try:
             real_url = extract_download_link(page_url)
@@ -2041,8 +2299,8 @@ We remember and honor those who sacrificed their lives for freedom and justice. 
                     self.set_status(f"Completed: {filename}")
                     print(f"=== DOWNLOAD SINGLE COMPLETED for {page_url} ===")
                     
-                    # Check if all downloads are complete and trigger auto-extraction
-                    self.check_and_trigger_auto_extract()
+                    # Check if all downloads are complete and trigger auto-extraction only once
+                    self.check_all_downloads_complete_and_trigger()
                 else:
                     self.update_url_status(page_url, "stopped")
                     self.set_status(f"Stopped: {filename}")
