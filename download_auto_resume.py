@@ -224,6 +224,7 @@ class DownloadAutoResume:
                         popup.update()
                         time.sleep(1)
                     
+                    # Auto-resume if user didn't make choice
                     if not user_choice["made"]:
                         # Auto-resume
                         popup.destroy()
@@ -292,9 +293,18 @@ class DownloadAutoResume:
             print(f"FRESH MONITOR ERROR: Failed to show notification: {e}")
     
     def _force_resume_download(self, url):
-        """REMOVED: No longer auto-resumes downloads"""
-        print(f"FRESH AUTO-RESUME: Auto-resume disabled - download {url} will remain stopped")
-        return False
+        """Auto-resume download after timeout"""
+        print(f"FRESH AUTO-RESUME: Auto-resuming download after timeout - {url[:50]}...")
+        # Clear monitoring state
+        if url in self.paused_downloads:
+            del self.paused_downloads[url]
+        if url in self.resume_timers:
+            del self.resume_timers[url]
+        if url in self.notification_shown:
+            self.notification_shown.discard(url)
+        # Trigger resume
+        self.main_app.start_single_url(url)
+        return True
     
     def resume_timer_loop(self):
         """Simple background loop - just for cleanup"""
