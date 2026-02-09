@@ -1068,7 +1068,7 @@ class SmartFolderManager:
                 "-ibck+"
             ]
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)  # 2 hours
             return result.returncode == 0
             
         except Exception:
